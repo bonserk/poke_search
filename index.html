@@ -50,6 +50,12 @@
     .row td:first-child{border-top-left-radius:10px;border-bottom-left-radius:10px}
     .row td:last-child{border-top-right-radius:10px;border-bottom-right-radius:10px}
     .badge-type{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.18);margin:3px;font-size:13px;line-height:1}
+    /* forms grid */
+    .forms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+    .mini-card{background:#0c132b;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px}
+    .mini-card .thumb{width:100%;height:120px;object-fit:contain;display:block;margin:0 auto}
+    .badge-soft{display:inline-block;padding:4px 8px;border-radius:999px;background:#121a38;border:1px solid rgba(255,255,255,.08);font-size:12px;margin-right:6px}
+    .label{font-size:14px;margin-top:6px}
   </style>
 </head>
 <body>
@@ -59,6 +65,11 @@
       <h1>PokeSearch‑KR</h1>
       <div class="pill"><span>데이터</span><strong>PokeAPI</strong></div>
     </header>
+
+    <!-- 시작 화면 히어로 이미지 -->
+    <div id="hero" class="card" style="margin-top:14px;overflow:hidden">
+      <img src="https://drive.google.com/uc?export=view&id=1sl7REyosk7RtRyfjrlmSvBDsuzmCMDsb" alt="Pokemon Hero" style="width:100%;display:block;border-radius:12px"/>
+    </div>
 
     <div class="card" style="margin-top:14px">
       <div class="searchbar">
@@ -179,21 +190,27 @@ async function search(){
   if(!q) return;
   resultEl.innerHTML = skeleton();
   statusEl.textContent = '';
-
   try{
     const resolved = await resolveQuery(q);
     if(!resolved) throw new Error('해당 이름/번호를 찾을 수 없습니다. KO 인덱스를 구축 후 다시 시도하세요.');
     const { id, en, ko } = resolved;
-
     const [pokemon, species] = await Promise.all([
       fetchJson(`${API}/pokemon/${id}`),
       fetchJson(`${API}/pokemon-species/${id}`),
     ]);
-
-    const evo = await loadEvolution(species);
-    const moves = await loadMovesKR(pokemon);
-
-    await renderPokemon({ pokemon, species, evo, moves, koName:ko, enName:en });
+    const [evo, moves, forms] = await Promise.all([
+      loadEvolution(species),
+      loadMovesKR(pokemon),
+      loadForms(species, (ko || (species.names||[]).find(n=>n.language?.name==='ko')?.name || en || species.name))
+    ]);
+    // 첫 검색 시 히어로 숨김
+    const hero = document.getElementById('hero'); if(hero) hero.style.display='none';
+    await renderPokemon({ pokemon, species, evo, moves, koName:ko, enName:en, forms });
+  }catch(err){
+    console.error(err);
+    resultEl.innerHTML = `<div class="card error">오류: ${escapeHtml(err.message||String(err))}</div>`;
+  }
+}
   }catch(err){
     console.error(err);
     resultEl.innerHTML = `<div class="card error">오류: ${escapeHtml(err.message||String(err))}</div>`;
@@ -292,7 +309,7 @@ async function loadMovesKR(pokemon){
   return out;
 }
 
-async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
+async function renderPokemon({ pokemon, species, evo, moves, koName, enName, forms }){
   const displayName = koName || (species.names||[]).find(n=>n.language?.name==='ko')?.name || enName || species.name;
   const id = pokemon.id;
   const sprite = pokemon.sprites?.other?.['official-artwork']?.front_default || pokemon.sprites?.front_default;
@@ -365,6 +382,8 @@ async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
 
     ${typeSections}
 
+    ${renderFormsSection(forms)}
+
     <div class=\"card\" style=\"margin-top:14px\">
       <div class=\"section-title\">진화 체인</div>
       <div class=\"evo\">${evoHtml}</div>
@@ -389,6 +408,88 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<
 
 // First-run: preload species list quickly (no heavy KO index yet)
 ensureSpeciesList().catch(e=>console.warn(e));
+
+/* -------- 폼/바리에티 로딩 (메가/거다이맥스/지역 폼) -------- */
+const REGION_KEYS = ['alola','galar','hisui','paldea'];
+const REGION_LABEL_KO = {alola:'알로라', galar:'가라르', hisui:'히스이', paldea:'팔데아'};
+
+function pickSprite(p){
+  return p?.sprites?.other?.['official-artwork']?.front_default || p?.sprites?.front_default || '';
+}
+
+async function loadForms(species, baseKo){
+  const result = { mega:[], gmax:[], regional:[] };
+  // 1) species.varieties → 각 포켓몬(바리에티)
+  for(const v of species.varieties||[]){
+    try{
+      const p = await fetchJson(v.pokemon.url);
+      const name = p.name;
+      const sprite = pickSprite(p);
+      const types = p.types.map(t=>t.type.name);
+      // 지역 폼 판별: 이름 접미사
+      const rk = REGION_KEYS.find(k=>name.includes(k));
+      if(rk){
+        const label = `${baseKo} (${REGION_LABEL_KO[rk]}의 모습)`;
+        result.regional.push({ name, label, sprite, types });
+      }
+      // 메가/거다이맥스 후보: 이름 규칙 우선 체크
+      if(name.includes('mega')){
+        const label = `${baseKo} (메가진화${name.includes('x')?' X': name.includes('y')?' Y':''})`;
+        result.mega.push({ name, label, sprite, types });
+      }
+      if(name.includes('gmax')){
+        const label = `${baseKo} (거다이맥스)`;
+        result.gmax.push({ name, label, sprite, types });
+      }
+      // 2) pokemon.forms → pokemon-form 상세로 보완
+      for(const f of p.forms||[]){
+        try{
+          const form = await fetchJson(f.url);
+          if(form.is_mega){
+            const label = `${baseKo} (메가진화${/mega-.*x$/i.test(form.name)?' X': /mega-.*y$/i.test(form.name)?' Y':''})`;
+            result.mega.push({ name: form.name, label, sprite, types });
+          }
+          const fn = (form.form_name||'').toLowerCase();
+          if(form.is_battle_only && (fn==='gmax' || /gmax/i.test(form.name))){
+            const label = `${baseKo} (거다이맥스)`;
+            result.gmax.push({ name: form.name, label, sprite, types });
+          }
+        }catch(e){ console.warn('form fetch fail', e); }
+      }
+    }catch(e){ console.warn('variety fetch fail', e); }
+  }
+  // 중복 제거(이름 기준)
+  const dedup = arr=>Object.values(arr.reduce((acc,x)=>{acc[x.name]=x;return acc;},{}));
+  result.mega = dedup(result.mega);
+  result.gmax = dedup(result.gmax);
+  result.regional = dedup(result.regional);
+  return result;
+}
+
+function renderFormsSection(forms){
+  const any = (forms?.mega?.length||0)+(forms?.gmax?.length||0)+(forms?.regional?.length||0);
+  if(!any) return '';
+  const section = [];
+  const group = (title, items)=>{
+    if(!items || !items.length) return '';
+    const cards = items.map(it=>{
+      const types = (it.types||[]).map(t=>typeBadge(t)).join('');
+      return `<div class=\"mini-card\">${it.sprite? `<img class=\"thumb\" src=\"${it.sprite}\" alt=\"${escapeHtml(it.label)}\"/>`:''}
+        <div class=\"label\">${escapeHtml(it.label)}</div>
+        <div style=\"margin-top:6px\">${types}</div>
+      </div>`;
+    }).join('');
+    return `<div class=\"card\" style=\"margin-top:14px\">
+      <div class=\"section-title\">${title}</div>
+      <div class=\"forms-grid\">${cards}</div>
+    </div>`;
+  };
+  section.push(group('지역의 모습', forms.regional));
+  section.push(group('메가진화', forms.mega));
+  section.push(group('거다이맥스', forms.gmax));
+  return section.join('');
+}
+
 
 // -------- 타입 상성(방어) 유틸 --------
 const TYPE_KEYS = ['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'];
