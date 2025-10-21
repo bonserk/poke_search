@@ -65,7 +65,7 @@
 
     <div id="result" class="results"></div>
 
-    <div class="footer">ⓘ 비공식 팬 메이드 도구. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
+    <div class="footer">ⓘ 모모 아빠 만듬. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
   </div>
 
 <script>
@@ -244,19 +244,44 @@ function abilities(abilities){
 async function loadEvolution(species){
   if(!species?.evolution_chain?.url) return [];
   const chain = await fetchJson(species.evolution_chain.url);
-  const stages = [];
-  function walk(node, depth=0){
-    if(!node) return;
-    stages.push({ depth, name: node.species.name, id: parseInt(node.species.url.match(/\/(\d+)\/?$/)[1],10) });
-    (node.evolves_to||[]).forEach(n=>walk(n, depth+1));
-  }
-  walk(chain.chain, 0);
-  // Attach Korean names if available in koMap
+  const edges = [];
   const map = db.koMap;
-  return stages.map(s=>({ ...s, ko: Object.keys(map).find(k=>map[k].en===s.name) || null }));
+  function nodeInfo(sp){
+    const id = parseInt(sp.url.match\(/\/(\n?\d+)\/?$/\)[1],10); // fallback safe
+    const en = sp.name;
+    const ko = Object.keys(map).find(k=>map[k].en===en) || null;
+    return { id, en, ko, name: en };
+  }
+  function walk(node){
+    if(!node) return;
+    const from = nodeInfo(node.species);
+    (node.evolves_to||[]).forEach(child=>{
+      const to = nodeInfo(child.species);
+      const details = child.evolution_details||[];
+      edges.push({ from, to, details });
+      walk(child);
+    });
+  }
+  walk(chain.chain);
+  return edges; // list of {from, to, details}
 }
 
-async function loadMovesKR(pokemon){
+function formatEvoDetails(details){
+  if(!details || !details.length) return '조건 정보 없음';
+  const fmtOne = (d)=>{
+    const P=[];
+    if(d.trigger?.name){
+      const t = d.trigger.name;
+      // 대표 트리거 한글화(간단 표기)
+      const tkr = t==='level-up'?'레벨업': t==='use-item'?'아이템 사용': t==='trade'?'교환': t==='shed'?'갈라짐': t==='spin'?'회전': t;
+      P.push(tkr);
+    }
+    if(d.min_level) P.push(`Lv ${d.min_level}`);
+    if(d.item?.name) P.push(`item:${d.item.name}`);
+    if(d.held_item?.name) P.push(`held:${d.held_item.name}`);
+    if(d.time_of_day) P.push(`${d.time_of_day} 시간대`);
+    if(d.min_happiness) P.push(`친밀도≥${d.min_happiness}`);
+    if(d.min_beauty) P.push(`뷰티≥${d.min(pokemon){
   // Prefer level-up moves from the latest version group the Pokémon has
   const groups = new Set();
   pokemon.moves.forEach(m=>m.version_group_details.forEach(v=>groups.add(v.version_group.name)));
