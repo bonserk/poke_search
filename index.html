@@ -224,7 +224,7 @@ async function resolveQuery(q){
     const koName = (s.names||[]).find(n=>n.language?.name==='ko')?.name?.trim();
     if(koName){ const map = db.koMap; map[koName] = { id:s.id, en:s.name }; db.koMap = map; }
     if(koName===q){ return { id:s.id, en:s.name, ko:q } }
-    await sleep(180);
+    await sleep(10);
   }
   return null;
 }
@@ -286,7 +286,7 @@ async function loadMovesKR(pokemon){
       const j = await fetchJson(mv.url);
       const ko = (j.names||[]).find(n=>n.language?.name==='ko')?.name || mv.name;
       out.push({ level: mv.lv, en: mv.name, ko });
-      await sleep(80);
+      await sleep(10);
     }catch{ out.push({ level: mv.lv, en: mv.name, ko: mv.name }); }
   }
   return out;
