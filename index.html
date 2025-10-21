@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PokeSearch-KR — 포켓몬 검색</title>
+  <title>모모를 위한 포켓몬 검색</title>
   <meta name="description" content="PokeAPI 기반 한국어 포켓몬 검색 웹앱" />
   <style>
     :root{
@@ -43,7 +43,7 @@
     .list-item:hover{background:#10183a}
     @media(max-width:860px){.col-4{grid-column:span 12}.col-8{grid-column:span 12}.kv{grid-template-columns:1fr}}
 
-    /* ---- tables & type badges ---- */
+    /* tables & type badges */
     .table{width:100%;border-collapse:separate;border-spacing:0 6px}
     .table th,.table td{padding:10px 12px;vertical-align:top}
     .table thead th{font-size:13px;color:#a9b7dd;text-align:left}
@@ -57,7 +57,7 @@
   <div class="container">
     <header>
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.523 22 22 17.523 22 12S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.8a8.2 8.2 0 1 0 0-16.4 8.2 8.2 0 0 0 0 16.4Zm-8-8.2h7v-6.7A6.7 6.7 0 0 0 4 12ZM12 6.3V12h6.7A6.7 6.7 0 0 0 12 6.3Z" fill="currentColor"/></svg>
-      <h1>PokeSearch-KR</h1>
+      <h1>모모를 위한 포켓몬 검색</h1>
       <div class="pill"><span>데이터</span><strong>PokeAPI</strong></div>
     </header>
 
@@ -74,14 +74,14 @@
 
     <div id="result" class="results"></div>
 
-    <div class="footer">ⓘ 비공식 팬 메이드 도구. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
+    <div class="footer">ⓘ 모모아빠 만듬. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
   </div>
 
 <script>
 /**
- * PokeSearch-KR (전체 업데이트 반영 버전)
+ * PokeSearch-KR (업데이트 반영)
  * - 한국어/영문/번호 검색
- * - 기본 정보, 진화(조건 표기), 기술(레벨업 위주, 한/영 병기)
+ * - 기본 정보, 진화(조건/필요 레벨), 기술(레벨업 위주, 한/영 병기)
  * - 속성 상성: 방어 기준 테이블 + 공격 기준(내 타입별) 테이블
  * - 한국어 이름 매핑: localStorage 기반 점진 인덱싱
  * - 타입 라벨(한글) & 컬러 커스텀
@@ -104,7 +104,7 @@ const db = {
   set lastIndexed(v){ localStorage.setItem('lastIndexed', String(v)); },
 };
 
-// Prefetch species list (ids & urls only; cheap)
+// Prefetch species list
 async function ensureSpeciesList(){
   if(db.speciesList.length>0) return db.speciesList;
   const res = await fetch(`${API}/pokemon-species?limit=20000`);
@@ -115,7 +115,7 @@ async function ensureSpeciesList(){
   return list;
 }
 
-// Build KO map incrementally (respecting rate limits)
+// KO index builder
 let indexerRunning = false;
 async function buildKoIndex(batchSize=15, delayMs=1500){
   if(indexerRunning) return;
@@ -145,7 +145,7 @@ async function buildKoIndex(batchSize=15, delayMs=1500){
 $('#warmBtn').addEventListener('click', ()=>{
   (async()=>{
     await ensureSpeciesList();
-    let loops = 8; // ~120 species per click
+    let loops = 8;
     async function step(){ if(loops--<=0) return; await buildKoIndex(15, 1100); setTimeout(step, 200); }
     step();
   })();
@@ -200,7 +200,7 @@ async function search(){
   }
 }
 
-// Resolve user query (ko/en/id)
+// Resolve user query
 async function resolveQuery(q){
   if(/^\d+$/.test(q)){
     const id = parseInt(q,10); return { id, en: null, ko: Object.entries(db.koMap).find(([k,v])=>v.id===id)?.[0]||null };
@@ -233,10 +233,6 @@ async function fetchJson(url){
 }
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
-
-function typeTags(types){
-  return types.map(t=>`<span class="tag">${t.type.name}</span>`).join('');
-}
 
 function statRows(stats){
   return stats.map(s=>`<div class="kv"><div>${s.stat.name.toUpperCase()}</div><div><div class="badge">${s.base_stat}</div></div></div>`).join('');
@@ -272,24 +268,29 @@ async function loadEvolution(species){
   }
 
   walk(chain.chain);
-  return edges; // [{ from, to, details[] }, ...]
+  return edges;
 }
 
+/** 조건 문자열화: 레벨업은 "(필요: Lv N)"로 명확히 표시 */
 function formatEvoDetails(details){
   if(!details || !details.length) return '조건 정보 없음';
   const fmtOne = (d)=>{
     const P=[];
     if(d.trigger?.name){
       const t = d.trigger.name;
-      const tkr = t==='level-up'?'레벨업'
-               : t==='use-item'?'아이템 사용'
-               : t==='trade'?'교환'
-               : t==='shed'?'갈라짐'
-               : t==='spin'?'회전'
-               : t;
-      P.push(tkr);
+      const base = t==='level-up'?'레벨업'
+                 : t==='use-item'?'아이템 사용'
+                 : t==='trade'    ?'교환'
+                 : t==='shed'     ?'갈라짐'
+                 : t==='spin'     ?'회전'
+                 : t;
+      if(t==='level-up' && d.min_level){
+        P.push(`${base} (필요: Lv ${d.min_level})`);
+      } else {
+        P.push(base);
+      }
     }
-    if(d.min_level) P.push(`Lv ${d.min_level}`);
+    // min_level은 위에서 처리(레벨업일 때만 의미있음). 그 외 조건들은 그대로 병기
     if(d.item?.name) P.push(`item:${d.item.name}`);
     if(d.held_item?.name) P.push(`held:${d.held_item.name}`);
     if(d.time_of_day) P.push(`${d.time_of_day} 시간대`);
@@ -302,9 +303,9 @@ function formatEvoDetails(details){
     if(d.needs_overworld_rain) P.push('비 오는 날');
     if(d.turn_upside_down) P.push('기기 거꾸로');
     if(Number.isInteger(d.gender)) P.push(d.gender===1?'♀ 전용':'♂ 전용');
-    if(d.relative_physical_stats===1) P.push('공격>방어');
+    if(d.relative_physical_stats===1)  P.push('공격>방어');
     if(d.relative_physical_stats===-1) P.push('공격<방어');
-    if(d.relative_physical_stats===0) P.push('공격=방어');
+    if(d.relative_physical_stats===0)  P.push('공격=방어');
     if(d.party_type?.name) P.push(`파티 타입:${d.party_type.name}`);
     if(d.party_species?.name) P.push(`파티 종:${d.party_species.name}`);
     return P.join(' · ') || '조건 정보 없음';
@@ -352,11 +353,9 @@ async function ensureTypeChart(){
     const rel = j.damage_relations;
     const toNames = (arr)=> (arr||[]).map(x=>x.name);
     return [t, {
-      // 방어 기준
       doubleFrom: toNames(rel.double_damage_from),
       halfFrom:   toNames(rel.half_damage_from),
       noFrom:     toNames(rel.no_damage_from),
-      // 공격 기준
       doubleTo:   toNames(rel.double_damage_to),
       halfTo:     toNames(rel.half_damage_to),
       noTo:       toNames(rel.no_damage_to)
@@ -457,11 +456,10 @@ async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
   const chart = await ensureTypeChart();
   const typeSections = computeTypeSections(pokemon, chart);
 
-  // ---- 진화 표시 HTML (edges 또는 stages 형식 대응) ----
+  // ---- 진화 표시 HTML (edges/stages 모두 대응) ----
   let evoHtml = '<span class="hint">진화 정보 없음</span>';
   if (Array.isArray(evo) && evo.length) {
     if (evo[0] && typeof evo[0] === 'object' && 'from' in evo[0] && 'to' in evo[0]) {
-      // edges 형식: 간선마다 조건 문자열 표시
       evoHtml = evo.map(e => {
         const fromNm = e.from.ko || e.from.en;
         const toNm = e.to.ko || e.to.en;
@@ -473,7 +471,6 @@ async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
         </div>`;
       }).join('');
     } else if (evo[0] && 'id' in evo[0]) {
-      // stages 형식: 조건 없이 체인
       evoHtml = evo.map((s, i) => {
         const nm = s.ko || s.name;
         const mid = `<div class="pill"><span>#${s.id}</span><strong>${escapeHtml(nm)}</strong></div>`;
