@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>모모를 위한 포켓몬 검색</title>
+  <title>PokeSearch-KR — 포켓몬 검색</title>
   <meta name="description" content="PokeAPI 기반 한국어 포켓몬 검색 웹앱" />
   <style>
     :root{
@@ -56,7 +56,7 @@
   <div class="container">
     <header>
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.523 22 22 17.523 22 12S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.8a8.2 8.2 0 1 0 0-16.4 8.2 8.2 0 0 0 0 16.4Zm-8-8.2h7v-6.7A6.7 6.7 0 0 0 4 12ZM12 6.3V12h6.7A6.7 6.7 0 0 0 12 6.3Z" fill="currentColor"/></svg>
-      <h1>모모를 위한 포켓몬 검색</h1>
+      <h1>PokeSearch‑KR</h1>
       <div class="pill"><span>데이터</span><strong>PokeAPI</strong></div>
     </header>
 
@@ -73,7 +73,7 @@
 
     <div id="result" class="results"></div>
 
-    <div class="footer">ⓘ 모모아빠 만듬. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
+    <div class="footer">ⓘ 비공식 팬 메이드 도구. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
   </div>
 
 <script>
@@ -224,7 +224,7 @@ async function resolveQuery(q){
     const koName = (s.names||[]).find(n=>n.language?.name==='ko')?.name?.trim();
     if(koName){ const map = db.koMap; map[koName] = { id:s.id, en:s.name }; db.koMap = map; }
     if(koName===q){ return { id:s.id, en:s.name, ko:q } }
-    await sleep(10);
+    await sleep(180);
   }
   return null;
 }
@@ -286,7 +286,7 @@ async function loadMovesKR(pokemon){
       const j = await fetchJson(mv.url);
       const ko = (j.names||[]).find(n=>n.language?.name==='ko')?.name || mv.name;
       out.push({ level: mv.lv, en: mv.name, ko });
-      await sleep(10);
+      await sleep(80);
     }catch{ out.push({ level: mv.lv, en: mv.name, ko: mv.name }); }
   }
   return out;
@@ -303,6 +303,31 @@ async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
 
   const chart = await ensureTypeChart();
   const typeSections = computeTypeSections(pokemon, chart);
+
+  // ---- 진화 표시 HTML (edges 또는 stages 모두 지원) ----
+  let evoHtml = '<span class="hint">진화 정보 없음</span>';
+  if (Array.isArray(evo) && evo.length) {
+    if (evo[0] && typeof evo[0] === 'object' && 'from' in evo[0] && 'to' in evo[0]) {
+      // edges 형식: { from:{id,en,ko}, to:{id,en,ko}, details:[...] }
+      evoHtml = evo.map(e => {
+        const fromNm = e.from.ko || e.from.en;
+        const toNm = e.to.ko || e.to.en;
+        const cond = formatEvoDetails(e.details);
+        return `<div class="flex">
+          <div class="pill"><span>#${e.from.id}</span><strong>${escapeHtml(fromNm)}</strong></div>
+          <span class="arrow">— ${escapeHtml(cond)} →</span>
+          <div class="pill"><span>#${e.to.id}</span><strong>${escapeHtml(toNm)}</strong></div>
+        </div>`;
+      }).join('');
+    } else if (evo[0] && 'id' in evo[0]) {
+      // stages 형식: [{id,name,ko,depth}, ...] 단순 체인 렌더링
+      evoHtml = evo.map((s, i) => {
+        const nm = s.ko || s.name;
+        const mid = `<div class="pill"><span>#${s.id}</span><strong>${escapeHtml(nm)}</strong></div>`;
+        return mid + (i < evo.length - 1 ? '<span class="arrow">→</span>' : '');
+      }).join('');
+    }
+  }
 
   resultEl.innerHTML = `
     <div class=\"card\">
@@ -341,8 +366,7 @@ async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
     ${typeSections}
 
     <div class=\"card\" style=\"margin-top:14px\">
-      <div class=\"section-title\">진화 체인</div>
-      <div class=\"evo\">${/* evoLine is computed elsewhere; keep placeholder for compatibility */ ''}</div>
+      <div class=\"section-title\">진화 체인</div>\n      <div class=\"evo\">${evoHtml}</div>
     </div>
 
     <div class=\"card\" style=\"margin-top:14px\">
