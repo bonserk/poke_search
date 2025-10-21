@@ -31,7 +31,7 @@
     .pill{padding:4px 10px;border-radius:999px;background:#142048;display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.12)}
     .flex{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
     .sprite{width:128px;height:128px;image-rendering:pixelated}
-    .evo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .evo{display:flex;align-items:center;gap:10px;flex-direction:column;align-items:flex-start}
     .arrow{opacity:.6}
     .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
@@ -42,6 +42,7 @@
     .list-item{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
     .list-item:hover{background:#10183a}
     @media(max-width:860px){.col-4{grid-column:span 12}.col-8{grid-column:span 12}.kv{grid-template-columns:1fr}}
+
     /* ---- tables & type badges ---- */
     .table{width:100%;border-collapse:separate;border-spacing:0 6px}
     .table th,.table td{padding:10px 12px;vertical-align:top}
@@ -56,7 +57,7 @@
   <div class="container">
     <header>
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.523 22 22 17.523 22 12S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.8a8.2 8.2 0 1 0 0-16.4 8.2 8.2 0 0 0 0 16.4Zm-8-8.2h7v-6.7A6.7 6.7 0 0 0 4 12ZM12 6.3V12h6.7A6.7 6.7 0 0 0 12 6.3Z" fill="currentColor"/></svg>
-      <h1>PokeSearch‑KR</h1>
+      <h1>PokeSearch-KR</h1>
       <div class="pill"><span>데이터</span><strong>PokeAPI</strong></div>
     </header>
 
@@ -78,11 +79,12 @@
 
 <script>
 /**
- * PokeSearch‑KR
+ * PokeSearch-KR (전체 업데이트 반영 버전)
  * - 한국어/영문/번호 검색
- * - 포켓몬 기본정보, 타입, 능력치, 기술(레벨업 위주), 진화체인 표시
- * - 한국어 이름 매핑은 localStorage 기반 점진 인덱싱(사용자 브라우저에서 안전하게 구축)
- * - PokeAPI 요청 레이트 제한 고려하여 배치 처리 및 지연 적용
+ * - 기본 정보, 진화(조건 표기), 기술(레벨업 위주, 한/영 병기)
+ * - 속성 상성: 방어 기준 테이블 + 공격 기준(내 타입별) 테이블
+ * - 한국어 이름 매핑: localStorage 기반 점진 인덱싱
+ * - 타입 라벨(한글) & 컬러 커스텀
  */
 
 const API = 'https://pokeapi.co/api/v2';
@@ -135,23 +137,21 @@ async function buildKoIndex(batchSize=15, delayMs=1500){
     i++; processed++;
     db.lastIndexed = i;
     statusEl.textContent = `KO 인덱싱 진행: ${i}/${list.length} (브라우저에 저장됨)`;
-    await new Promise(r=>setTimeout(r, delayMs));
+    await sleep(delayMs);
   }
   indexerRunning = false;
 }
 
 $('#warmBtn').addEventListener('click', ()=>{
-  // Kick off a larger warmup in the background
   (async()=>{
     await ensureSpeciesList();
-    // Process many batches gradually without blocking UI
-    let loops = 8; // ~8*15 = 120 species per 클릭
+    let loops = 8; // ~120 species per click
     async function step(){ if(loops--<=0) return; await buildKoIndex(15, 1100); setTimeout(step, 200); }
     step();
   })();
 });
 
-// Suggest list (if KO map exists)
+// Suggest list
 queryEl.addEventListener('input', ()=>{
   const q = queryEl.value.trim();
   if(!q){ suggestEl.style.display='none'; return; }
@@ -202,21 +202,18 @@ async function search(){
 
 // Resolve user query (ko/en/id)
 async function resolveQuery(q){
-  // number
   if(/^\d+$/.test(q)){
     const id = parseInt(q,10); return { id, en: null, ko: Object.entries(db.koMap).find(([k,v])=>v.id===id)?.[0]||null };
   }
-  // try english direct
   try{
     const p = await fetchJson(`${API}/pokemon/${encodeURIComponent(q.toLowerCase())}`);
     return { id:p.id, en:p.name, ko: Object.entries(db.koMap).find(([k,v])=>v.id===p.id)?.[0]||null };
   }catch{}
-  // try korean via local map
   const hit = db.koMap[q];
   if(hit) return { id: hit.id, en: hit.en, ko: q };
-  // as a last resort, attempt progressive scan around lastIndexed window to find the KO name quickly
+
   const list = await ensureSpeciesList();
-  const windowSize = 60; // scan a small window for responsiveness
+  const windowSize = 60;
   const start = Math.max(0, db.lastIndexed - windowSize);
   const end = Math.min(list.length, db.lastIndexed + windowSize);
   for(let i=start;i<end;i++){
@@ -249,23 +246,74 @@ function abilities(abilities){
   return abilities.map(a=>`<span class="badge">${a.ability.name}${a.is_hidden? ' (hidden)': ''}</span>`).join('');
 }
 
+/* ---------- 진화: edges + 조건(details) ---------- */
 async function loadEvolution(species){
   if(!species?.evolution_chain?.url) return [];
   const chain = await fetchJson(species.evolution_chain.url);
-  const stages = [];
-  function walk(node, depth=0){
-    if(!node) return;
-    stages.push({ depth, name: node.species.name, id: parseInt(node.species.url.match(/\/(\d+)\/?$/)[1],10) });
-    (node.evolves_to||[]).forEach(n=>walk(n, depth+1));
-  }
-  walk(chain.chain, 0);
-  // Attach Korean names if available in koMap
+  const edges = [];
   const map = db.koMap;
-  return stages.map(s=>({ ...s, ko: Object.keys(map).find(k=>map[k].en===s.name) || null }));
+
+  function nodeInfo(sp){
+    const id = parseInt(sp.url.match(/\/(\d+)\/?$/)[1], 10);
+    const en = sp.name;
+    const ko = Object.keys(map).find(k => map[k].en === en) || null;
+    return { id, en, ko, name: en };
+  }
+
+  function walk(node){
+    if(!node) return;
+    const from = nodeInfo(node.species);
+    (node.evolves_to || []).forEach(child => {
+      const to = nodeInfo(child.species);
+      const details = child.evolution_details || [];
+      edges.push({ from, to, details });
+      walk(child);
+    });
+  }
+
+  walk(chain.chain);
+  return edges; // [{ from, to, details[] }, ...]
 }
 
+function formatEvoDetails(details){
+  if(!details || !details.length) return '조건 정보 없음';
+  const fmtOne = (d)=>{
+    const P=[];
+    if(d.trigger?.name){
+      const t = d.trigger.name;
+      const tkr = t==='level-up'?'레벨업'
+               : t==='use-item'?'아이템 사용'
+               : t==='trade'?'교환'
+               : t==='shed'?'갈라짐'
+               : t==='spin'?'회전'
+               : t;
+      P.push(tkr);
+    }
+    if(d.min_level) P.push(`Lv ${d.min_level}`);
+    if(d.item?.name) P.push(`item:${d.item.name}`);
+    if(d.held_item?.name) P.push(`held:${d.held_item.name}`);
+    if(d.time_of_day) P.push(`${d.time_of_day} 시간대`);
+    if(d.min_happiness) P.push(`친밀도≥${d.min_happiness}`);
+    if(d.min_beauty) P.push(`뷰티≥${d.min_beauty}`);
+    if(d.min_affection) P.push(`애정도≥${d.min_affection}`);
+    if(d.known_move?.name) P.push(`기술:${d.known_move.name}`);
+    if(d.known_move_type?.name) P.push(`타입:${d.known_move_type.name}`);
+    if(d.location?.name) P.push(`장소:${d.location.name}`);
+    if(d.needs_overworld_rain) P.push('비 오는 날');
+    if(d.turn_upside_down) P.push('기기 거꾸로');
+    if(Number.isInteger(d.gender)) P.push(d.gender===1?'♀ 전용':'♂ 전용');
+    if(d.relative_physical_stats===1) P.push('공격>방어');
+    if(d.relative_physical_stats===-1) P.push('공격<방어');
+    if(d.relative_physical_stats===0) P.push('공격=방어');
+    if(d.party_type?.name) P.push(`파티 타입:${d.party_type.name}`);
+    if(d.party_species?.name) P.push(`파티 종:${d.party_species.name}`);
+    return P.join(' · ') || '조건 정보 없음';
+  };
+  return details.map(fmtOne).join(' OR ');
+}
+
+/* ---------- 기술(레벨업, 최신 버전그룹) ---------- */
 async function loadMovesKR(pokemon){
-  // Prefer level-up moves from the latest version group the Pokémon has
   const groups = new Set();
   pokemon.moves.forEach(m=>m.version_group_details.forEach(v=>groups.add(v.version_group.name)));
   const latest = Array.from(groups).sort().slice(-1)[0];
@@ -279,7 +327,6 @@ async function loadMovesKR(pokemon){
     .sort((a,b)=>a.lv-b.lv)
     .slice(0,40);
 
-  // Fetch Korean names for these moves (limited count to avoid rate)
   const out=[];
   for(const mv of byLevel){
     try{
@@ -292,104 +339,7 @@ async function loadMovesKR(pokemon){
   return out;
 }
 
-async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
-  const displayName = koName || (species.names||[]).find(n=>n.language?.name==='ko')?.name || enName || species.name;
-  const id = pokemon.id;
-  const sprite = pokemon.sprites?.other?.['official-artwork']?.front_default || pokemon.sprites?.front_default;
-  const typesHtml = pokemon.types.map(t=>typeBadge(t.type.name)).join('');
-
-  // 진화 카드(기존): evoLine은 상위 로직에서 생성되므로 여기선 그대로 유지
-  const moveList = moves.map(m=>`<div class=\"kv\"><div>Lv.${m.level}</div><div>${escapeHtml(m.ko)} <span class=\"hint\">(${escapeHtml(m.en)})</span></div></div>`).join('');
-
-  const chart = await ensureTypeChart();
-  const typeSections = computeTypeSections(pokemon, chart);
-
-  // ---- 진화 표시 HTML (edges 또는 stages 모두 지원) ----
-  let evoHtml = '<span class="hint">진화 정보 없음</span>';
-  if (Array.isArray(evo) && evo.length) {
-    if (evo[0] && typeof evo[0] === 'object' && 'from' in evo[0] && 'to' in evo[0]) {
-      // edges 형식: { from:{id,en,ko}, to:{id,en,ko}, details:[...] }
-      evoHtml = evo.map(e => {
-        const fromNm = e.from.ko || e.from.en;
-        const toNm = e.to.ko || e.to.en;
-        const cond = formatEvoDetails(e.details);
-        return `<div class="flex">
-          <div class="pill"><span>#${e.from.id}</span><strong>${escapeHtml(fromNm)}</strong></div>
-          <span class="arrow">— ${escapeHtml(cond)} →</span>
-          <div class="pill"><span>#${e.to.id}</span><strong>${escapeHtml(toNm)}</strong></div>
-        </div>`;
-      }).join('');
-    } else if (evo[0] && 'id' in evo[0]) {
-      // stages 형식: [{id,name,ko,depth}, ...] 단순 체인 렌더링
-      evoHtml = evo.map((s, i) => {
-        const nm = s.ko || s.name;
-        const mid = `<div class="pill"><span>#${s.id}</span><strong>${escapeHtml(nm)}</strong></div>`;
-        return mid + (i < evo.length - 1 ? '<span class="arrow">→</span>' : '');
-      }).join('');
-    }
-  }
-
-  resultEl.innerHTML = `
-    <div class=\"card\">
-      <div class=\"grid\">
-        <div class=\"col-4\" style=\"text-align:center\">
-          ${sprite? `<img src=\"${sprite}\" alt=\"${escapeHtml(displayName)}\" class=\"sprite\"/>` : ''}
-          <div style=\"margin-top:8px\" class=\"flex\">
-            <span class=\"pill\">#${id}</span>
-            ${typesHtml}
-          </div>
-        </div>
-        <div class=\"col-8\">
-          <h2 style=\"margin:0 0 8px 0\">${escapeHtml(displayName)} <span class=\"hint\">(${escapeHtml(species.name)})</span></h2>
-          <div class=\"grid\" style=\"gap:8px\">
-            <div class=\"col-8\">
-              <div class=\"section-title\">기본 정보</div>
-              <div class=\"kv\">
-                <div>키/몸무게</div><div>${(pokemon.height/10).toFixed(1)} m / ${(pokemon.weight/10).toFixed(1)} kg</div>
-                <div>능력(Abilities)</div><div>${abilities(pokemon.abilities)}</div>
-                <div>기본 능력치</div><div>${statRows(pokemon.stats)}</div>
-              </div>
-            </div>
-            <div class=\"col-4\">
-              <div class=\"section-title\">알 정보</div>
-              <div class=\"kv\">
-                <div>포획율</div><div>${species.capture_rate}</div>
-                <div>기본친밀도</div><div>${species.base_happiness}</div>
-                <div>성비</div><div>${genderRatio(species.gender_rate)}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    ${typeSections}
-
-    <div class=\"card\" style=\"margin-top:14px\">
-      <div class=\"section-title\">진화 체인</div>\n      <div class=\"evo\">${evoHtml}</div>
-    </div>
-
-    <div class=\"card\" style=\"margin-top:14px\">
-      <div class=\"section-title\">레벨업 기술 (최신 버전 그룹 기준 최대 40개)</div>
-      ${moveList || '<span class=\"hint\">표시할 기술이 없습니다.</span>'}
-    </div>`;
-}
-
-function genderRatio(g){
-  if(g===-1) return '무성';
-  const female = (g/8)*100; const male = 100-female; return `♂ ${male.toFixed(0)}% / ♀ ${female.toFixed(0)}%`;
-}
-
-function skeleton(){
-  return `<div class="card"><div class="flex"><div class="spinner"></div><div>조회 중… PokeAPI에서 데이터를 불러오고 있습니다.</div></div></div>`
-}
-
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
-
-// First-run: preload species list quickly (no heavy KO index yet)
-ensureSpeciesList().catch(e=>console.warn(e));
-
-// -------- 타입 상성(방어) 유틸 --------
+/* ---------- 타입 상성(라벨/컬러/표/공격·방어) ---------- */
 const TYPE_KEYS = ['normal','fire','water','electric','grass','ice','fighting','poison','ground','flying','psychic','bug','rock','ghost','dragon','dark','steel','fairy'];
 
 async function ensureTypeChart(){
@@ -431,14 +381,13 @@ function computeDefenseMultipliers(defTypes, chart){
   return mult;
 }
 
-// 한글 라벨 & 컬러 맵
 const TYPE_LABEL_KO = {normal:'노말', fire:'불꽃', water:'물', electric:'전기', grass:'풀', ice:'얼음', fighting:'격투', poison:'독', ground:'땅', flying:'비행', psychic:'에스퍼', bug:'벌레', rock:'바위', ghost:'고스트', dragon:'드래곤', dark:'악', steel:'강철', fairy:'페어리'};
-const TYPE_COLORS = {normal:'#A8A77A', fire:'#EE8130', water:'#6390F0', electric:'#F7D02C', grass:'#7AC74C', ice:'#96D9D6', fighting:'#C22E28', poison:'#A33EA1', ground:'#E2BF65', flying:'#A98FF3', psychic:'#F95587', bug:'#A6B91A', rock:'#B6A136', ghost:'#735797', dragon:'#6F35FC', dark:'#705746', steel:'#B7B7CE', fairy:'#D685AD'};
+const TYPE_COLORS   = {normal:'#A8A77A', fire:'#EE8130', water:'#6390F0', electric:'#F7D02C', grass:'#7AC74C', ice:'#96D9D6', fighting:'#C22E28', poison:'#A33EA1', ground:'#E2BF65', flying:'#A98FF3', psychic:'#F95587', bug:'#A6B91A', rock:'#B6A136', ghost:'#735797', dragon:'#6F35FC', dark:'#705746', steel:'#B7B7CE', fairy:'#D685AD'};
 
 function typeBadge(t){
   const label = TYPE_LABEL_KO[t]||t;
   const color = TYPE_COLORS[t]||'#1a244d';
-  return `<span class=\"badge-type\" style=\"background:${color}22;border-color:${color}66\">${label}</span>`;
+  return `<span class="badge-type" style="background:${color}22;border-color:${color}66">${label}</span>`;
 }
 
 function buildDefenseTable(defense){
@@ -446,10 +395,10 @@ function buildDefenseTable(defense){
   for(const [atk, mul] of Object.entries(defense)) groups[String(mul)].push(atk);
   const order = ['4','2','1','0.5','0.25','0'];
   const row = (mul, arr)=>{
-    const cells = arr.sort((a,b)=> (TYPE_LABEL_KO[a]||a).localeCompare(TYPE_LABEL_KO[b]||b)).map(typeBadge).join('') || '<span class=\"hint\">없음</span>';
-    return `<tr class=\"row\"><td style=\"width:120px\">×${mul}</td><td>${cells}</td></tr>`;
+    const cells = arr.sort((a,b)=> (TYPE_LABEL_KO[a]||a).localeCompare(TYPE_LABEL_KO[b]||b)).map(typeBadge).join('') || '<span class="hint">없음</span>';
+    return `<tr class="row"><td style="width:120px">×${mul}</td><td>${cells}</td></tr>`;
   };
-  return `<table class=\"table\"><thead><tr><th>배율</th><th>공격 타입</th></tr></thead><tbody>`+
+  return `<table class="table"><thead><tr><th>배율</th><th>공격 타입</th></tr></thead><tbody>`+
          order.map(m=>row(m, groups[m])).join('')+
          `</tbody></table>`;
 }
@@ -457,28 +406,23 @@ function buildDefenseTable(defense){
 function buildAttackTableFor(atkType, chart){
   const rel = chart[atkType]||{doubleTo:[],halfTo:[],noTo:[]};
   const set2 = new Set(rel.doubleTo), set05 = new Set(rel.halfTo), set0 = new Set(rel.noTo);
-  // ×1은 나머지
   const x1 = TYPE_KEYS.filter(t=>!set2.has(t)&&!set05.has(t)&&!set0.has(t));
   const groups = { '2': Array.from(set2), '1': x1, '0.5': Array.from(set05), '0': Array.from(set0) };
   const order = ['2','1','0.5','0'];
   const row = (mul, arr)=>{
-    const cells = arr.sort((a,b)=> (TYPE_LABEL_KO[a]||a).localeCompare(TYPE_LABEL_KO[b]||b)).map(typeBadge).join('') || '<span class=\"hint\">없음</span>';
-    return `<tr class=\"row\"><td style=\"width:120px\">×${mul}</td><td>${cells}</td></tr>`;
+    const cells = arr.sort((a,b)=> (TYPE_LABEL_KO[a]||a).localeCompare(TYPE_LABEL_KO[b]||b)).map(typeBadge).join('') || '<span class="hint">없음</span>';
+    return `<tr class="row"><td style="width:120px">×${mul}</td><td>${cells}</td></tr>`;
   };
-  return `<table class=\"table\"><thead><tr><th>배율</th><th>상대 타입</th></tr></thead><tbody>`+
+  return `<table class="table"><thead><tr><th>배율</th><th>상대 타입</th></tr></thead><tbody>`+
          order.map(m=>row(m, groups[m])).join('')+
          `</tbody></table>`;
-}
-
-function labelTypesKo(arr){
-  return arr.map(t=>TYPE_LABEL_KO[t]||t).join(', ');
 }
 
 function attackCardsFor(types, chart){
   return types.map(t=>{
     const label = TYPE_LABEL_KO[t.type.name]||t.type.name;
-    return `<div class=\"card\" style=\"margin-top:14px\">
-        <div class=\"section-title\">공격 상성 — 내 타입: ${label}</div>
+    return `<div class="card" style="margin-top:14px">
+        <div class="section-title">공격 상성 — 내 타입: ${label}</div>
         ${buildAttackTableFor(t.type.name, chart)}
       </div>`;
   }).join('');
@@ -486,10 +430,10 @@ function attackCardsFor(types, chart){
 
 function computeDefenseSection(pokemon, chart){
   const defense = computeDefenseMultipliers(pokemon.types.map(t=>t.type.name), chart);
-  return `<div class=\"card\" style=\"margin-top:14px\">
-      <div class=\"section-title\">속성 상성 (방어 기준)</div>
+  return `<div class="card" style="margin-top:14px">
+      <div class="section-title">속성 상성 (방어 기준)</div>
       ${buildDefenseTable(defense)}
-      <div class=\"hint\">설명: 공격 타입 대비 피해 배율입니다. 예: \"불 ×2\"는 불꽃 타입 공격에 2배 피해를 받는다는 뜻입니다.</div>
+      <div class="hint">설명: 공격 타입 대비 피해 배율입니다. 예: "불 ×2"는 불꽃 타입 공격에 2배 피해를 받는다는 뜻입니다.</div>
     </div>`;
 }
 
@@ -501,20 +445,104 @@ function computeTypeSections(pokemon, chart){
   return computeDefenseSection(pokemon, chart) + computeAttackSection(pokemon, chart);
 }
 
-function computeDefenseMultipliers(defTypes, chart){
-  const mult = Object.fromEntries(TYPE_KEYS.map(k=>[k,1]));
-  for(const d of defTypes){
-    const rel = chart[d]; if(!rel) continue;
-    for(const atk of rel.doubleFrom) mult[atk] *= 2;
-    for(const atk of rel.halfFrom)   mult[atk] *= 0.5;
-    for(const atk of rel.noFrom)     mult[atk] = 0;
+/* ---------- 렌더링 ---------- */
+async function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
+  const displayName = koName || (species.names||[]).find(n=>n.language?.name==='ko')?.name || enName || species.name;
+  const id = pokemon.id;
+  const sprite = pokemon.sprites?.other?.['official-artwork']?.front_default || pokemon.sprites?.front_default;
+  const typesHtml = pokemon.types.map(t=>typeBadge(t.type.name)).join('');
+
+  const moveList = moves.map(m=>`<div class="kv"><div>Lv.${m.level}</div><div>${escapeHtml(m.ko)} <span class="hint">(${escapeHtml(m.en)})</span></div></div>`).join('');
+
+  const chart = await ensureTypeChart();
+  const typeSections = computeTypeSections(pokemon, chart);
+
+  // ---- 진화 표시 HTML (edges 또는 stages 형식 대응) ----
+  let evoHtml = '<span class="hint">진화 정보 없음</span>';
+  if (Array.isArray(evo) && evo.length) {
+    if (evo[0] && typeof evo[0] === 'object' && 'from' in evo[0] && 'to' in evo[0]) {
+      // edges 형식: 간선마다 조건 문자열 표시
+      evoHtml = evo.map(e => {
+        const fromNm = e.from.ko || e.from.en;
+        const toNm = e.to.ko || e.to.en;
+        const cond = formatEvoDetails(e.details);
+        return `<div class="flex">
+          <div class="pill"><span>#${e.from.id}</span><strong>${escapeHtml(fromNm)}</strong></div>
+          <span class="arrow">— ${escapeHtml(cond)} →</span>
+          <div class="pill"><span>#${e.to.id}</span><strong>${escapeHtml(toNm)}</strong></div>
+        </div>`;
+      }).join('');
+    } else if (evo[0] && 'id' in evo[0]) {
+      // stages 형식: 조건 없이 체인
+      evoHtml = evo.map((s, i) => {
+        const nm = s.ko || s.name;
+        const mid = `<div class="pill"><span>#${s.id}</span><strong>${escapeHtml(nm)}</strong></div>`;
+        return mid + (i < evo.length - 1 ? '<span class="arrow">→</span>' : '');
+      }).join('');
+    }
   }
-  for(const k of Object.keys(mult)){
-    mult[k] = (mult[k]===0.25||mult[k]===0.5||mult[k]===1||mult[k]===2||mult[k]===4)? mult[k] : Number(mult[k].toFixed(2));
-  }
-  return mult;
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="grid">
+        <div class="col-4" style="text-align:center">
+          ${sprite? `<img src="${sprite}" alt="${escapeHtml(displayName)}" class="sprite"/>` : ''}
+          <div style="margin-top:8px" class="flex">
+            <span class="pill">#${id}</span>
+            ${typesHtml}
+          </div>
+        </div>
+        <div class="col-8">
+          <h2 style="margin:0 0 8px 0">${escapeHtml(displayName)} <span class="hint">(${escapeHtml(species.name)})</span></h2>
+          <div class="grid" style="gap:8px">
+            <div class="col-8">
+              <div class="section-title">기본 정보</div>
+              <div class="kv">
+                <div>키/몸무게</div><div>${(pokemon.height/10).toFixed(1)} m / ${(pokemon.weight/10).toFixed(1)} kg</div>
+                <div>능력(Abilities)</div><div>${abilities(pokemon.abilities)}</div>
+                <div>기본 능력치</div><div>${statRows(pokemon.stats)}</div>
+              </div>
+            </div>
+            <div class="col-4">
+              <div class="section-title">알 정보</div>
+              <div class="kv">
+                <div>포획율</div><div>${species.capture_rate}</div>
+                <div>기본친밀도</div><div>${species.base_happiness}</div>
+                <div>성비</div><div>${genderRatio(species.gender_rate)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    ${typeSections}
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-title">진화 체인</div>
+      <div class="evo">${evoHtml}</div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-title">레벨업 기술 (최신 버전 그룹 기준 최대 40개)</div>
+      ${moveList || '<span class="hint">표시할 기술이 없습니다.</span>'}
+    </div>
+  `;
 }
 
+function genderRatio(g){
+  if(g===-1) return '무성';
+  const female = (g/8)*100; const male = 100-female; return `♂ ${male.toFixed(0)}% / ♀ ${female.toFixed(0)}%`;
+}
+
+function skeleton(){
+  return `<div class="card"><div class="flex"><div class="spinner"></div><div>조회 중… PokeAPI에서 데이터를 불러오고 있습니다.</div></div></div>`
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+// First-run: preload species list quickly
+ensureSpeciesList().catch(e=>console.warn(e));
 </script>
 </body>
 </html>
