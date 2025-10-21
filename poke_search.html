@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PokeSearch-KR — 포켓몬 검색</title>
+  <meta name="description" content="PokeAPI 기반 한국어 포켓몬 검색 웹앱" />
+  <style>
+    :root{
+      --bg:#0b1020; --panel:#111831; --muted:#7c8db2; --text:#e6eeff; --accent:#7aa2ff; --accent-2:#4dd4a8; --danger:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:linear-gradient(180deg,#0b1020,#0e1430 55%,#0b1020);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Apple Color Emoji,Noto Color Emoji;color:var(--text);}
+    .container{max-width:980px;margin:0 auto;padding:24px}
+    header{display:flex;align-items:center;gap:12px}
+    h1{font-size:24px;margin:0}
+    .card{background:rgba(255,255,255,0.03);backdrop-filter:saturate(140%) blur(6px);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .searchbar{display:flex;gap:10px;align-items:center}
+    input[type="text"]{flex:1;background:#0e1732;color:var(--text);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:14px 16px;font-size:16px;outline:none}
+    input[type="text"]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(122,162,255,.22)}
+    button{background:linear-gradient(135deg,var(--accent),#5f85ff);border:none;color:white;padding:12px 16px;border-radius:12px;font-weight:700;cursor:pointer}
+    button.secondary{background:#162147;color:var(--text);border:1px solid rgba(255,255,255,.12)}
+    .hint{color:var(--muted);font-size:13px;margin-top:8px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+    .col-4{grid-column:span 4}
+    .col-8{grid-column:span 8}
+    .section-title{font-size:14px;letter-spacing:.04em;color:#a9b7dd;margin:0 0 8px 0}
+    .kv{display:grid;grid-template-columns:140px 1fr;gap:6px;font-size:15px}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:#1a244d;border:1px solid rgba(255,255,255,.12);margin-right:6px;margin-bottom:6px}
+    .tag{display:inline-block;padding:6px 10px;border-radius:10px;background:#121a38;border:1px solid rgba(255,255,255,.08);margin:4px;font-size:13px}
+    .pill{padding:4px 10px;border-radius:999px;background:#142048;display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.12)}
+    .flex{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .sprite{width:128px;height:128px;image-rendering:pixelated}
+    .evo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .arrow{opacity:.6}
+    .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .error{color:var(--danger)}
+    .results{margin-top:18px}
+    .footer{margin-top:28px;color:var(--muted);font-size:12px;text-align:center}
+    .list{max-height:240px;overflow:auto;background:#0c132b;border:1px solid rgba(255,255,255,.1);border-radius:12px}
+    .list-item{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
+    .list-item:hover{background:#10183a}
+    @media(max-width:860px){.col-4{grid-column:span 12}.col-8{grid-column:span 12}.kv{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.523 22 22 17.523 22 12S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.8a8.2 8.2 0 1 0 0-16.4 8.2 8.2 0 0 0 0 16.4Zm-8-8.2h7v-6.7A6.7 6.7 0 0 0 4 12ZM12 6.3V12h6.7A6.7 6.7 0 0 0 12 6.3Z" fill="currentColor"/></svg>
+      <h1>PokeSearch‑KR</h1>
+      <div class="pill"><span>데이터</span><strong>PokeAPI</strong></div>
+    </header>
+
+    <div class="card" style="margin-top:14px">
+      <div class="searchbar">
+        <input id="query" type="text" placeholder="예: 피카츄, 파이리, 이상해씨, 꼬부기… (영문/번호도 가능)" />
+        <button id="searchBtn">검색</button>
+        <button id="warmBtn" class="secondary" title="한국어 이름 인덱스를 순차적으로 구축합니다.">KO 인덱스 구축</button>
+      </div>
+      <div class="hint">입력은 한국어/영문 이름 또는 전국도감 번호(예: 25). 한국어 이름 즉시 검색이 안 되면 ‘KO 인덱스 구축’을 눌러 로컬에 점진적으로 이름 매핑을 만듭니다(요청 속도 제한 준수).</div>
+      <div id="status" class="hint"></div>
+      <div id="suggest" class="list" style="display:none"></div>
+    </div>
+
+    <div id="result" class="results"></div>
+
+    <div class="footer">ⓘ 비공식 팬 메이드 도구. 데이터 출처: PokeAPI. 이미지: PokeAPI sprites.</div>
+  </div>
+
+<script>
+/**
+ * PokeSearch‑KR
+ * - 한국어/영문/번호 검색
+ * - 포켓몬 기본정보, 타입, 능력치, 기술(레벨업 위주), 진화체인 표시
+ * - 한국어 이름 매핑은 localStorage 기반 점진 인덱싱(사용자 브라우저에서 안전하게 구축)
+ * - PokeAPI 요청 레이트 제한 고려하여 배치 처리 및 지연 적용
+ */
+
+const API = 'https://pokeapi.co/api/v2';
+const $ = (sel) => document.querySelector(sel);
+const resultEl = $('#result');
+const statusEl = $('#status');
+const suggestEl = $('#suggest');
+const queryEl = $('#query');
+
+// ---------- Local cache ----------
+const db = {
+  get koMap(){ try{return JSON.parse(localStorage.getItem('koMap')||'{}')}catch{return {}} },
+  set koMap(v){ localStorage.setItem('koMap', JSON.stringify(v)); },
+  get speciesList(){ try{return JSON.parse(localStorage.getItem('speciesList')||'[]')}catch{return []} },
+  set speciesList(v){ localStorage.setItem('speciesList', JSON.stringify(v)); },
+  get lastIndexed(){ return parseInt(localStorage.getItem('lastIndexed')||'0',10); },
+  set lastIndexed(v){ localStorage.setItem('lastIndexed', String(v)); },
+};
+
+// Prefetch species list (ids & urls only; cheap)
+async function ensureSpeciesList(){
+  if(db.speciesList.length>0) return db.speciesList;
+  const res = await fetch(`${API}/pokemon-species?limit=20000`);
+  if(!res.ok) throw new Error('species list fetch 실패');
+  const data = await res.json();
+  const list = data.results.map(x=>({name:x.name, url:x.url, id: parseInt(x.url.match(/\/(\d+)\/?$/)[1],10)}));
+  db.speciesList = list;
+  return list;
+}
+
+// Build KO map incrementally (respecting rate limits)
+let indexerRunning = false;
+async function buildKoIndex(batchSize=15, delayMs=1500){
+  if(indexerRunning) return;
+  indexerRunning = true;
+  const list = await ensureSpeciesList();
+  let i = db.lastIndexed || 0;
+  let processed = 0;
+  while(i < list.length && processed < batchSize){
+    const sp = list[i];
+    try{
+      const sres = await fetch(sp.url);
+      if(!sres.ok) throw new Error('species fetch 실패');
+      const s = await sres.json();
+      const koName = (s.names||[]).find(n=>n.language?.name==='ko')?.name;
+      if(koName){
+        const map = db.koMap; map[koName.trim()] = { id:s.id, en:s.name }; db.koMap = map;
+      }
+    }catch(e){ console.warn('index err', e); }
+    i++; processed++;
+    db.lastIndexed = i;
+    statusEl.textContent = `KO 인덱싱 진행: ${i}/${list.length} (브라우저에 저장됨)`;
+    await new Promise(r=>setTimeout(r, delayMs));
+  }
+  indexerRunning = false;
+}
+
+$('#warmBtn').addEventListener('click', ()=>{
+  // Kick off a larger warmup in the background
+  (async()=>{
+    await ensureSpeciesList();
+    // Process many batches gradually without blocking UI
+    let loops = 8; // ~8*15 = 120 species per 클릭
+    async function step(){ if(loops--<=0) return; await buildKoIndex(15, 1100); setTimeout(step, 200); }
+    step();
+  })();
+});
+
+// Suggest list (if KO map exists)
+queryEl.addEventListener('input', ()=>{
+  const q = queryEl.value.trim();
+  if(!q){ suggestEl.style.display='none'; return; }
+  const map = db.koMap;
+  const keys = Object.keys(map).filter(k=>k.includes(q)).slice(0,50);
+  if(keys.length){
+    suggestEl.innerHTML = keys.map(k=>`<div class="list-item" data-id="${map[k].id}">${k} <span class="hint">#${map[k].id}</span></div>`).join('');
+    suggestEl.style.display='block';
+    suggestEl.querySelectorAll('.list-item').forEach(li=>li.addEventListener('click', e=>{
+      const id = e.currentTarget.getAttribute('data-id');
+      queryEl.value = Object.entries(map).find(([name,v])=>String(v.id)===String(id))[0];
+      suggestEl.style.display='none';
+      search();
+    }));
+  } else {
+    suggestEl.style.display='none';
+  }
+});
+
+$('#searchBtn').addEventListener('click', search);
+queryEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter') search(); });
+
+async function search(){
+  const q = queryEl.value.trim();
+  if(!q) return;
+  resultEl.innerHTML = skeleton();
+  statusEl.textContent = '';
+
+  try{
+    const resolved = await resolveQuery(q);
+    if(!resolved) throw new Error('해당 이름/번호를 찾을 수 없습니다. KO 인덱스를 구축 후 다시 시도하세요.');
+    const { id, en, ko } = resolved;
+
+    const [pokemon, species] = await Promise.all([
+      fetchJson(`${API}/pokemon/${id}`),
+      fetchJson(`${API}/pokemon-species/${id}`),
+    ]);
+
+    const evo = await loadEvolution(species);
+    const moves = await loadMovesKR(pokemon);
+
+    renderPokemon({ pokemon, species, evo, moves, koName:ko, enName:en });
+  }catch(err){
+    console.error(err);
+    resultEl.innerHTML = `<div class="card error">오류: ${escapeHtml(err.message||String(err))}</div>`;
+  }
+}
+
+// Resolve user query (ko/en/id)
+async function resolveQuery(q){
+  // number
+  if(/^\d+$/.test(q)){
+    const id = parseInt(q,10); return { id, en: null, ko: Object.entries(db.koMap).find(([k,v])=>v.id===id)?.[0]||null };
+  }
+  // try english direct
+  try{
+    const p = await fetchJson(`${API}/pokemon/${encodeURIComponent(q.toLowerCase())}`);
+    return { id:p.id, en:p.name, ko: Object.entries(db.koMap).find(([k,v])=>v.id===p.id)?.[0]||null };
+  }catch{}
+  // try korean via local map
+  const hit = db.koMap[q];
+  if(hit) return { id: hit.id, en: hit.en, ko: q };
+  // as a last resort, attempt progressive scan around lastIndexed window to find the KO name quickly
+  const list = await ensureSpeciesList();
+  const windowSize = 60; // scan a small window for responsiveness
+  const start = Math.max(0, db.lastIndexed - windowSize);
+  const end = Math.min(list.length, db.lastIndexed + windowSize);
+  for(let i=start;i<end;i++){
+    const s = await fetchJson(list[i].url);
+    const koName = (s.names||[]).find(n=>n.language?.name==='ko')?.name?.trim();
+    if(koName){ const map = db.koMap; map[koName] = { id:s.id, en:s.name }; db.koMap = map; }
+    if(koName===q){ return { id:s.id, en:s.name, ko:q } }
+    await sleep(180);
+  }
+  return null;
+}
+
+async function fetchJson(url){
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(`요청 실패: ${url}`);
+  return res.json();
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+function typeTags(types){
+  return types.map(t=>`<span class="tag">${t.type.name}</span>`).join('');
+}
+
+function statRows(stats){
+  return stats.map(s=>`<div class="kv"><div>${s.stat.name.toUpperCase()}</div><div><div class="badge">${s.base_stat}</div></div></div>`).join('');
+}
+
+function abilities(abilities){
+  return abilities.map(a=>`<span class="badge">${a.ability.name}${a.is_hidden? ' (hidden)': ''}</span>`).join('');
+}
+
+async function loadEvolution(species){
+  if(!species?.evolution_chain?.url) return [];
+  const chain = await fetchJson(species.evolution_chain.url);
+  const stages = [];
+  function walk(node, depth=0){
+    if(!node) return;
+    stages.push({ depth, name: node.species.name, id: parseInt(node.species.url.match(/\/(\d+)\/?$/)[1],10) });
+    (node.evolves_to||[]).forEach(n=>walk(n, depth+1));
+  }
+  walk(chain.chain, 0);
+  // Attach Korean names if available in koMap
+  const map = db.koMap;
+  return stages.map(s=>({ ...s, ko: Object.keys(map).find(k=>map[k].en===s.name) || null }));
+}
+
+async function loadMovesKR(pokemon){
+  // Prefer level-up moves from the latest version group the Pokémon has
+  const groups = new Set();
+  pokemon.moves.forEach(m=>m.version_group_details.forEach(v=>groups.add(v.version_group.name)));
+  const latest = Array.from(groups).sort().slice(-1)[0];
+  const byLevel = pokemon.moves
+    .map(m=>({
+      name: m.move.name,
+      url: m.move.url,
+      lv: (m.version_group_details.find(v=>v.version_group.name===latest && v.move_learn_method.name==='level-up')||{}).level_learned_at||null
+    }))
+    .filter(x=>x.lv!==null)
+    .sort((a,b)=>a.lv-b.lv)
+    .slice(0,40);
+
+  // Fetch Korean names for these moves (limited count to avoid rate)
+  const out=[];
+  for(const mv of byLevel){
+    try{
+      const j = await fetchJson(mv.url);
+      const ko = (j.names||[]).find(n=>n.language?.name==='ko')?.name || mv.name;
+      out.push({ level: mv.lv, en: mv.name, ko });
+      await sleep(80);
+    }catch{ out.push({ level: mv.lv, en: mv.name, ko: mv.name }); }
+  }
+  return out;
+}
+
+function renderPokemon({ pokemon, species, evo, moves, koName, enName }){
+  const displayName = koName || (species.names||[]).find(n=>n.language?.name==='ko')?.name || enName || species.name;
+  const id = pokemon.id;
+  const sprite = pokemon.sprites?.other?.['official-artwork']?.front_default || pokemon.sprites?.front_default;
+  const types = typeTags(pokemon.types);
+
+  const evoLine = evo.length
+    ? evo.map((e,i)=>{
+        const nm = e.ko || e.name;
+        return `<div class="pill"><span>#${e.id}</span><strong>${nm}</strong></div>${i<evo.length-1?'<span class="arrow">→</span>':''}`;
+      }).join('')
+    : '<span class="hint">진화 정보 없음</span>';
+
+  const moveList = moves.map(m=>`<div class="kv"><div>Lv.${m.level}</div><div>${escapeHtml(m.ko)} <span class="hint">(${escapeHtml(m.en)})</span></div></div>`).join('');
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="grid">
+        <div class="col-4" style="text-align:center">
+          ${sprite? `<img src="${sprite}" alt="${displayName}" class="sprite"/>` : ''}
+          <div style="margin-top:8px" class="flex">
+            <span class="pill">#${id}</span>
+            <span class="pill">${types}</span>
+          </div>
+        </div>
+        <div class="col-8">
+          <h2 style="margin:0 0 8px 0">${escapeHtml(displayName)} <span class="hint">(${escapeHtml(species.name)})</span></h2>
+          <div class="grid" style="gap:8px">
+            <div class="col-8">
+              <div class="section-title">기본 정보</div>
+              <div class="kv">
+                <div>키/몸무게</div><div>${(pokemon.height/10).toFixed(1)} m / ${(pokemon.weight/10).toFixed(1)} kg</div>
+                <div>능력(Abilities)</div><div>${abilities(pokemon.abilities)}</div>
+                <div>기본 능력치</div><div>${statRows(pokemon.stats)}</div>
+              </div>
+            </div>
+            <div class="col-4">
+              <div class="section-title">알 정보</div>
+              <div class="kv">
+                <div>포획율</div><div>${species.capture_rate}</div>
+                <div>기본친밀도</div><div>${species.base_happiness}</div>
+                <div>성비</div><div>${genderRatio(species.gender_rate)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-title">진화 체인</div>
+      <div class="evo">${evoLine}</div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="section-title">레벨업 기술 (최신 버전 그룹 기준 최대 40개)</div>
+      ${moveList || '<span class="hint">표시할 기술이 없습니다.</span>'}
+    </div>
+  `;
+}
+
+function genderRatio(g){
+  if(g===-1) return '무성';
+  const female = (g/8)*100; const male = 100-female; return `♂ ${male.toFixed(0)}% / ♀ ${female.toFixed(0)}%`;
+}
+
+function skeleton(){
+  return `<div class="card"><div class="flex"><div class="spinner"></div><div>조회 중… PokeAPI에서 데이터를 불러오고 있습니다.</div></div></div>`
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+// First-run: preload species list quickly (no heavy KO index yet)
+ensureSpeciesList().catch(e=>console.warn(e));
+
+</script>
+</body>
+</html>
